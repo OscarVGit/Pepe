@@ -1,5 +1,9 @@
 # Pepe — Agentic Private Equity Associate
 
+# IN PROGRESS - If you are reading this, please follow me on this journey
+
+## This will link into another project I have built in private
+
 > **Pepe is not an AI that you open. Pepe is an AI employee you contact.**
 
 Pepe is a persistent AI junior private-equity associate. You message him
