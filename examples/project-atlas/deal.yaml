@@ -1,0 +1,15 @@
+deal_id: atlas
+name: Project Atlas
+current_status: Financial modelling
+completed:
+  - CIM extracted
+  - Historical financials reconciled
+  - Base LBO constructed
+waiting_for:
+  - Debt terms from user
+next_actions:
+  - Update debt schedule
+  - Run base/downside cases
+  - Validate returns
+pending_approval: []
+classification_default: DEAL_SENSITIVE
