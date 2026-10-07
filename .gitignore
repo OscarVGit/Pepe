@@ -10,3 +10,8 @@ deals/*/
 *.xlsx
 !tests/fixtures/**
 .DS_Store
+
+# Pepe Core Index (generated, environment-specific)
+pepe.db
+pepe.db-wal
+pepe.db-shm
