@@ -15,3 +15,12 @@
 8. **Privacy by construction.** Local sanitisation before cloud; hard policies
    enforced in code/gateway; fail closed.
 9. **Documentation is product.** Future agents must learn Pepe from this repo.
+10. **Pepe Core Index is the firm-level view; deal state is the source of
+    truth.** The index (`pepe.db` at repo root) is a read-aggregated mirror,
+    never authoritative. Per-deal `pepe.db` remains sovereign. Sync is
+    best-effort and never fails a primary operation.
+11. **Reconnaissance vs surgery.** Deep-agent-style long-horizon reasoning is
+    reconnaissance only: it explores, proposes, and returns structured
+    findings. Surgery (mutating deal artifacts, approving conclusions, writing
+    numbers of record) is always deterministic, audit-logged, and
+    approval-gated.
