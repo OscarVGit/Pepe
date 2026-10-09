@@ -31,6 +31,10 @@ from .core_index.query import (
     pipeline_summary,
 )
 from .export.markdown import generate_status_md
+from .finance import IRRNoSolutionError as FinanceIRRNoSolution
+from .finance import cagr as finance_cagr
+from .finance import irr as finance_irr
+from .finance import moic as finance_moic
 from .routing.local_client import ChatMessage, ChatRequest, OllamaClient, OllamaUnavailable, is_running
 from .state.connection import get_pepe_db
 from .state.machine import (
@@ -193,6 +197,35 @@ def ask(
 
 _INSPECT_XLSX = re.compile(r"(?:inspect|list|show)\s+([^\s]+\.xlsx)", re.IGNORECASE)
 _INSPECT_PDF = re.compile(r"(?:inspect|extract|read)\s+([^\s]+\.pdf)", re.IGNORECASE)
+# Finance trigger: capture the function name; numbers are pulled out of the rest
+# of the message. This stays forgiving of natural-language framing like
+# "Pepe, please compute IRR for the atlas deal cashflows -100, 0, 0, 0, 0, 170".
+_FINANCE_FN_RE = re.compile(
+    r"\b(?:compute|calc|run|give)\s+(irr|moic)\b(.*)$",
+    re.IGNORECASE,
+)
+# CAGR has its own shape: "compute cagr 100 to 200 over 5y".
+_CAGR_RE = re.compile(
+    r"\b(?:compute|calc|run)\s+cagr\s+(?:for|of)?\s*([\d.]+)\s*(?:to|->)\s*([\d.]+)\s*(?:over|in)\s*([\d.]+)\s*y",
+    re.IGNORECASE,
+)
+
+
+def _parse_cashflows(raw: str) -> list[float]:
+    nums = re.findall(r"-?\d+(?:\.\d+)?", raw)
+    if not nums:
+        raise ValueError("no numbers found")
+    return [float(n) for n in nums]
+
+
+def _dispatch_finance(name: str, cashflows: list[float]) -> dict:
+    if name == "irr":
+        r = finance_irr(cashflows)
+        return {"function": "irr", "cashflows": cashflows, "value": r}
+    if name == "moic":
+        m = finance_moic(cashflows)
+        return {"function": "moic", "cashflows": cashflows, "value": m}
+    raise ValueError(f"unknown finance function: {name}")
 
 
 def _run_one_step(root: Path, deal_id: str, task, message: str,
@@ -201,9 +234,10 @@ def _run_one_step(root: Path, deal_id: str, task, message: str,
 
     Phase 1 routing (checked in order):
       1. Explicit "wait/hold" intent  -> blocked
-      2. Excel/PDF inspection regex   -> deterministic tool
-      3. Local Ollama model           -> llm_reply
-      4. Fallback                     -> blocked with "no handler"
+      2. Deterministic finance tool   -> tool_result (IRR/MOIC/CAGR)
+      3. Excel/PDF inspection regex   -> deterministic tool
+      4. Local Ollama model           -> llm_reply
+      5. Fallback                     -> blocked with "no handler"
     """
     # 1. Explicit block intent. Checked first so we never accidentally send
     #    a "wait for bridge" message to a model and get a hallucinated bridge.
@@ -212,7 +246,34 @@ def _run_one_step(root: Path, deal_id: str, task, message: str,
         reason = f"awaiting: {m.group(1).strip()}" if m else "awaiting user-provided information"
         return {"kind": "blocked", "reason": reason}
 
-    # 2. Deterministic tools.
+    # 2. Deterministic finance tool (IRR/MOIC/CAGR).
+    m = _CAGR_RE.search(message)
+    if m:
+        try:
+            start, end, years = float(m.group(1)), float(m.group(2)), float(m.group(3))
+            value = finance_cagr(start, end, years)
+        except (ValueError, AssertionError) as e:
+            return {"kind": "blocked", "reason": f"cagr parse error: {e}"}
+        return {"kind": "tool_result", "tool": "finance.cagr",
+                "start": start, "end": end, "years": years, "value": value}
+
+    m = _FINANCE_FN_RE.search(message)
+    if m:
+        fn = m.group(1).lower()
+        tail = m.group(2)
+        try:
+            cashflows = _parse_cashflows(tail)
+        except ValueError as e:
+            return {"kind": "blocked", "reason": f"finance parse error: {e}"}
+        try:
+            detail = _dispatch_finance(fn, cashflows)
+        except FinanceIRRNoSolution as e:
+            return {"kind": "blocked", "reason": f"irr has no real solution: {e}"}
+        except ValueError as e:
+            return {"kind": "blocked", "reason": f"finance error: {e}"}
+        return {"kind": "tool_result", "tool": f"finance.{fn}", **detail}
+
+    # 3. Deterministic file tools.
     m = _INSPECT_XLSX.search(message)
     if m:
         path = root / deal_id / "models" / Path(m.group(1)).name
@@ -235,12 +296,12 @@ def _run_one_step(root: Path, deal_id: str, task, message: str,
         return {"kind": "tool_result", "tool": "pdf_inspect",
                 "path": str(path), "pages": n, "preview": preview}
 
-    # 3. Local model.
+    # 4. Local model.
     reply = _maybe_use_local_model(message, model=model, base_url=ollama_url)
     if reply:
         return {"kind": "llm_reply", "tool": "ollama", "model": model, "reply": reply}
 
-    # 4. Nothing matched.
+    # 5. Nothing matched.
     return {"kind": "unknown", "reason": "no tool matched and Ollama not reachable"}
 
 

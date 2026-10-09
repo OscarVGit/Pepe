@@ -15,7 +15,10 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
 ]
-dependencies = []
+dependencies = [
+    "numpy>=1.26",
+    "numpy-financial>=0.1",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.4"]
