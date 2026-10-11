@@ -18,6 +18,8 @@ from typing import Any, Callable, Optional
 
 from ..audit.record import AuditRecord, record
 from ..core_index import sync_deal
+from ..memory.allowlist import allowed_key
+from ..memory.store import list_facts, save_fact
 from ..routing.factory import make_router
 from ..routing.intent import IntentRouter, RouterError
 from ..routing.local_client import ChatMessage, ChatRequest, OllamaClient, OllamaUnavailable, is_running
@@ -31,10 +33,11 @@ DEFAULT_MAX_STEPS = 6
 # Terminal intents dispatch deterministically in one step.
 TERMINAL_INTENTS = {
     "compute_finance", "inspect_file", "status_query", "wait_for_info",
-    "approval_response", "new_deal", "list_deals", "question", "unclear",
+    "approval_response", "new_deal", "list_deals", "unclear",
 }
-# Open-ended intents escalate to the bounded reasoning loop.
-REASONING_INTENTS = {"run_analysis", "research", "long_horizon_task"}
+# Open-ended intents escalate to the bounded reasoning loop. Questions need
+# sense-making, so they reason over known facts rather than a dead-end.
+REASONING_INTENTS = {"run_analysis", "research", "long_horizon_task", "question"}
 
 
 class InnerLoop:
@@ -129,7 +132,10 @@ class InnerLoop:
                     note=intent, outputs=out)
         steps.append(step)
         traj.record(step)
-        return self._finish(out["kind"], out.get("reason", ""), steps, traj, result=out.get("result", {}))
+        result = dict(out.get("result", {}))
+        if out.get("reply"):
+            result["reply"] = out["reply"]
+        return self._finish(out["kind"], out.get("reason", ""), steps, traj, result=result)
 
     # ------------------------------------------------------------------ reasoning loop
 
@@ -141,7 +147,9 @@ class InnerLoop:
                 f"intent '{intent}' needs reasoning but Ollama is not reachable at {self.ollama_url}",
                 steps, traj,
             )
-        system = build_system_prompt(context, self.registry)
+        system = build_system_prompt(context, self.registry,
+                                     facts=[{"key": f.key, "value": f.value, "source": f.source}
+                                            for f in list_facts(self.deals_root, self.deal_id)])
         messages = [
             ChatMessage(role="system", content=system),
             ChatMessage(role="user", content=message),
@@ -172,6 +180,8 @@ class InnerLoop:
                 except Exception as e:
                     output = {"error": str(e)}
                 obs = json.dumps(output, default=str)
+                if isinstance(output, dict) and "error" not in output:
+                    _record_facts(self, name, output)
                 step = Step(index=len(steps), action="tool", tool=name,
                             inputs=params, outputs={"result": output if isinstance(output, (dict, list)) else str(output)})
                 steps.append(step); traj.record(step)
@@ -231,8 +241,34 @@ def _handle_compute_finance(loop: InnerLoop, message: str, context: dict) -> dic
                 raise
             except Exception as e:
                 return {"kind": "blocked", "reason": f"finance error: {e}"}
+            _record_facts(loop, f"finance.{fn}", out)
             return {"kind": "complete", "result": out}
     return {"kind": "blocked", "reason": "could not determine which finance function to run"}
+
+
+def _record_facts(loop: InnerLoop, tool_name: str, out: dict) -> None:
+    """Record allowlisted facts from a tool result. Deterministic: only the
+    mapped tool may write the key, and only the `value` field becomes the fact."""
+    if not isinstance(out, dict):
+        return
+    if "value" not in out:
+        return
+    if not allowed_key(fn_key := fn_key_from_tool(tool_name)):
+        return
+    written, prev = save_fact(loop.deals_root, loop.deal_id, fn_key, out["value"], source=tool_name)
+    if written:
+        record(loop.deals_root, AuditRecord.now(
+            loop.deal_id, "fact_overwritten" if prev else "fact_written",
+            key=fn_key,
+            value=str(out["value"]),
+            source=tool_name,
+            **({"old_value": str(prev.value)} if prev else {}),
+        ))
+
+
+def fn_key_from_tool(tool_name: str) -> str:
+    """finance.irr -> irr, finance.moic -> moic, etc."""
+    return tool_name.rsplit(".", 1)[-1]
 
 
 def _handle_inspect_file(loop: InnerLoop, message: str, context: dict) -> dict:
@@ -254,10 +290,96 @@ def _handle_inspect_file(loop: InnerLoop, message: str, context: dict) -> dict:
 
 
 def _handle_status_query(loop: InnerLoop, message: str, context: dict) -> dict:
-    from ..core_index.query import list_active_deals, pipeline_summary
+    from ..core_index.query import list_active_deals, pipeline_summary, list_deals
+    from ..core_index.sync import sync_deal as sync_deal_to_index
+    from ..state.machine import load_state
+    from ..state.connection import get_pepe_db
+    from ..memory.store import list_facts
+    from ..state.tasks import list_active
+    from ..audit.record import recent
+
     _, repo_root = _resolve_repo(loop.deals_root)
-    return {"kind": "complete", "result": {"pipeline": pipeline_summary(repo_root),
-                                           "active_deals": list_active_deals(repo_root)}}
+    # Sync the current deal to the Core Index first so the firm view reflects
+    # the latest per-deal state (auto-sync runs after the handler, not before).
+    try:
+        sync_deal_to_index(repo_root, loop.deal_id)
+    except Exception:
+        pass
+
+    # If the message names a deal (as `id` or as a word after 'the ... deal'),
+    # report on that deal specifically instead of the whole firm.
+    named = _named_deal_in(message, list_deals(repo_root))
+    if named is not None:
+        deal_root = loop.deals_root / named
+        p = deal_root / "state" / "pepe.db"
+        if not p.exists():
+            return {"kind": "complete", "result": {},
+                    "reply": f"Deal '{named}' has no workspace yet."}
+        conn, lock = get_pepe_db(loop.deals_root, named)
+        state = load_state(conn, lock, named)
+        active = list_active(loop.deals_root, named)
+        facts = list_facts(loop.deals_root, named)
+        audit = recent(loop.deals_root, named, limit=3)
+        details = {
+            "deal": named,
+            "state": state.value,
+            "active_tasks": [
+                {"description": t.description, "status": t.status,
+                 "blocked_reason": t.blocked_reason} for t in active
+            ],
+            "facts_count": len(facts),
+        }
+        reply = _render_deal_status(named, state.value, active)
+        return {"kind": "complete", "result": details, "reply": reply}
+
+    # Firm-level status.
+    result = {"pipeline": pipeline_summary(repo_root),
+              "active_deals": list_active_deals(repo_root)}
+    reply = _render_firm_status(result["pipeline"], result["active_deals"])
+    return {"kind": "complete", "result": result, "reply": reply}
+
+
+def _named_deal_in(message: str, deals: list[dict]) -> str | None:
+    """Find a deal id/name referenced in the message. Checks:
+       1. exact id match (lowercased), e.g. 'atlas'
+       2. a word following 'the ... deal' or 'deal named X'
+    Returns the deal id or None.
+    """
+    ml = message.lower()
+    for d in deals:
+        did = d["id"].lower()
+        if did and re.search(rf"\b{re.escape(did)}\b", ml):
+            return d["id"]
+    m = re.search(r"\bdeal\s+(?:named\s+)?([a-z0-9_-]+)", ml)
+    if m:
+        for d in deals:
+            if d["id"].lower() == m.group(1).lower():
+                return d["id"]
+    return None
+
+
+def _render_deal_status(deal_id: str, state: str, active) -> str:
+    if active:
+        parts = []
+        for t in active:
+            if t.status == "blocked":
+                parts.append(f"{t.description} (blocked: {t.blocked_reason or 'pending info'})")
+            else:
+                parts.append(f"{t.description} ({t.status})")
+        return f"{deal_id} is {state}. Active: " + "; ".join(parts) + "."
+    return f"{deal_id} is {state}. No active tasks."
+
+
+def _render_firm_status(summary: dict, active: list[dict]) -> str:
+    bits = [f"{summary['total_deals']} deal(s) total",
+            f"{summary['active']} active",
+            f"{summary['blocked_tasks']} blocked task(s)",
+            f"{summary['pending_tasks']} pending"]
+    s = ", ".join(bits) + "."
+    if active:
+        names = ", ".join(d["id"] for d in active[:5])
+        s += f" Active: {names}."
+    return s
 
 
 def _handle_wait_for_info(loop: InnerLoop, message: str, context: dict) -> dict:
@@ -283,12 +405,6 @@ def _handle_list_deals(loop: InnerLoop, message: str, context: dict) -> dict:
     return {"kind": "complete", "result": {"deals": list_deals(repo_root)}}
 
 
-def _handle_question(loop: InnerLoop, message: str, context: dict) -> dict:
-    # Questions that need reasoning fall to the reasoning loop; a pure lookup
-    # question is answered from audit/trajectory later. For now, escalate.
-    return {"kind": "blocked", "reason": "question requires reasoning; routed to inner loop"}
-
-
 def _resolve_repo(deals_root: Path) -> tuple[Path, Path]:
     repo_root = deals_root.parent if deals_root.name == "deals" else Path.cwd()
     return deals_root, repo_root
@@ -302,6 +418,5 @@ _TERMINAL_HANDLERS: dict[str, Callable[[InnerLoop, str, dict], dict]] = {
     "approval_response": _handle_approval_response,
     "new_deal": _handle_new_deal,
     "list_deals": _handle_list_deals,
-    "question": _handle_question,
     "unclear": lambda loop, m, c: {"kind": "waiting", "reason": "message unclear; please clarify"},
 }

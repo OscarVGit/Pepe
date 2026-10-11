@@ -33,6 +33,7 @@ from .core_index.query import (
 from .agent.inner_loop import InnerLoop
 from .agent.trajectory import read_trajectory
 from .export.markdown import generate_status_md
+from .memory.store import list_facts
 from .routing.factory import make_router
 from .routing.local_client import ChatMessage, ChatRequest, OllamaClient, OllamaUnavailable, is_running
 from .state.connection import get_pepe_db
@@ -186,6 +187,12 @@ def ask(
     # Auto-sync into the firm-level Pepe Core Index (best-effort, never fatal).
     _auto_sync(root, deal_id)
 
+    # A deterministic `reply` string (when handlers produce one) is the
+    # conversational answer. It goes to stderr so stdout stays pure JSON for
+    # machines; humans see it in the terminal as the "Pepe said" line.
+    reply = outcome.result.get("reply") if isinstance(outcome.result, dict) else None
+    if reply:
+        typer.echo(f"[pepe] {reply}", err=True)
     typer.echo(json.dumps({
         "outcome": {"kind": outcome.kind, "reason": outcome.reason, "result": outcome.result},
         "router": router_meta,
@@ -241,8 +248,44 @@ def status(
              "blocked_reason": t.blocked_reason}
             for t in active
         ],
+        "facts_count": len(list_facts(root, deal_id)),
         "recent_audit": audit,
     }, indent=2, default=str))
+
+
+# --------------------------------------------------------------------- recall
+
+
+@app.command()
+def recall(
+    deal_id: str = typer.Argument(..., help="Deal identifier."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON instead of a table."),
+    deals_root: Path = typer.Option(DEALS_ROOT_DEFAULT, "--deals-root"),
+) -> None:
+    """List a deal's known facts in insertion order."""
+    root = deals_root
+    p = root / deal_id / "state" / "pepe.db"
+    if not p.exists():
+        # A deal with no workspace yet is fine — no facts.
+        if as_json:
+            typer.echo(json.dumps([]))
+        else:
+            typer.echo(f"[info] no facts recorded yet for deal {deal_id}")
+        return
+    facts = list_facts(root, deal_id)
+    if as_json:
+        typer.echo(json.dumps([
+            {"key": f.key, "value": f.value, "source": f.source, "timestamp": f.timestamp}
+            for f in facts
+        ], indent=2))
+        return
+    if not facts:
+        typer.echo(f"[info] no facts recorded yet for deal {deal_id}")
+        return
+    typer.echo(f"# Facts — {deal_id} (insertion order)")
+    for f in facts:
+        src = f" (source: {f.source})" if f.source else ""
+        typer.echo(f"- **{f.key}**: {f.value}{src} — {f.timestamp}")
 
 
 # --------------------------------------------------------------------- resume

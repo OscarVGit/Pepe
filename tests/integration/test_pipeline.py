@@ -92,3 +92,25 @@ def test_firm_level_status_no_deal_id(repo_root):
     assert out["scope"] == "firm"
     assert out["summary"]["total_deals"] == 1
     assert len(out["all_deals"]) == 1
+
+
+def test_status_query_produces_reply_on_stderr(repo_root):
+    _run(["ask", "atlas", "wait for bridge"], cwd=repo_root)
+    res = _run(["ask", "atlas", "what is the status"], cwd=repo_root)
+    assert res.returncode == 0, res.stderr
+    # The conversational reply is on stderr, stdout stays pure JSON.
+    assert "[pepe]" in res.stderr
+    out = json.loads(res.stdout)
+    assert out["outcome"]["kind"] == "complete"
+    assert "reply" in out["outcome"]["result"]
+
+
+def test_status_query_reports_named_deal(repo_root):
+    _run(["ask", "atlas", "wait for bridge"], cwd=repo_root)
+    res = _run(["ask", "atlas", "what is the status of atlas"], cwd=repo_root)
+    assert res.returncode == 0, res.stderr
+    assert "[pepe] atlas " in res.stderr
+    out = json.loads(res.stdout)
+    result = out["outcome"]["result"]
+    assert result.get("deal") == "atlas"
+    assert "state" in result

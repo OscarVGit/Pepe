@@ -11,8 +11,13 @@ from typing import Any
 from ..tools.registry import ToolRegistry
 
 
-def build_system_prompt(deal_context: dict[str, Any] | None = None, registry: ToolRegistry | None = None) -> str:
+def build_system_prompt(
+    deal_context: dict[str, Any] | None = None,
+    registry: ToolRegistry | None = None,
+    facts: list[dict[str, str]] | None = None,
+) -> str:
     deal_context = deal_context or {}
+    facts = facts or []
     lines = [
         "You are Pepe, a junior private-equity associate. Be concise. If you do "
         "not know, say so. Never invent financial figures.",
@@ -22,6 +27,12 @@ def build_system_prompt(deal_context: dict[str, Any] | None = None, registry: To
         lines.append("Deal context:")
         for k, v in deal_context.items():
             lines.append(f"- {k}: {v}")
+        lines.append("")
+    if facts:
+        lines.append("Known deal facts (from the workspace; treat as current):")
+        for f in facts:
+            src = f" (source: {f['source']})" if f.get("source") else ""
+            lines.append(f"- {f['key']}: {f['value']}{src}")
         lines.append("")
     if registry is not None:
         lines.append("Available tools (name: description):")
