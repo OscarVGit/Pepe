@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "confidence_threshold": 0.80,
+  "instructions": "Classify the user's message into exactly one intent for a private-equity associate agent named Pepe. Pick the best-matching intent. If nothing fits, choose 'unclear'.",
+  "intents": {
+    "compute_finance": "The user is asking to compute IRR, MOIC, CAGR, NPV, returns, or other return/sensitivity numbers from supplied cashflows or values.",
+    "inspect_file": "The user is asking to read, describe, list, or inspect an Excel workbook, PDF, or other file in the deal workspace.",
+    "run_analysis": "The user is asking to run a bounded financial model analysis such as an LBO, DCF, scenario, downside, or sensitivity case.",
+    "research": "The user is asking for open-ended diligence, market research, comps gathering, or interpretation of CIM, term sheet, or prose documents.",
+    "long_horizon_task": "The user is asking for a multi-step, open-ended piece of work that spans several artifacts or steps and requires planning, delegation, or deep-agent reasoning.",
+    "status_query": "The user is asking about the status of one or more deals, the pipeline, outstanding tasks, the next action, or what changed.",
+    "wait_for_info": "The user is telling Pepe to pause, wait, hold, or block pending an external piece of information or approval.",
+    "approval_response": "The user is saying yes, no, go ahead, approve, reject, or stop in response to a pending approval request.",
+    "new_deal": "The user is creating a new deal workspace or starting work on a new deal.",
+    "list_deals": "The user is asking which deals exist, to list deals, or to show the pipeline.",
+    "question": "The user is asking a question about the deal, an artifact, or Pepe's prior work that needs an explanation rather than a tool action.",
+    "unclear": "None of the above; the message is ambiguous and Pepe should ask the user to clarify."
+  }
+}

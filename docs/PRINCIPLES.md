@@ -24,3 +24,8 @@
     findings. Surgery (mutating deal artifacts, approving conclusions, writing
     numbers of record) is always deterministic, audit-logged, and
     approval-gated.
+12. **Routing is probabilistic; execution is deterministic.** Von classifies
+    every inbound message into an intent before any tool runs. The intent
+    router is the only place a model is permitted to look at a message before
+    tool execution. Tools and state transitions that produce numbers of record
+    are deterministic, approval-gated, and never delegated to a model.

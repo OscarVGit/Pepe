@@ -11,37 +11,46 @@ from __future__ import annotations
 
 from typing import Any, Optional, Protocol, runtime_checkable
 
+from .inner_loop import InnerLoop
+from .schemas import TaskOutcome
+
 
 @runtime_checkable
 class Worker(Protocol):
     """A pluggable task executor.
 
-    Implementations must return a structured `outcome` dict. The orchestrator
+    Implementations must return a structured `TaskOutcome`. The orchestrator
     applies the outcome to per-deal state — workers do not touch pepe.db.
     """
 
     name: str
 
-    def execute(self, task: dict[str, Any]) -> dict[str, Any]:
-        """Execute one task. Return at minimum:
-          {"kind": "complete"|"blocked"|"needs_approval"|"failed",
-           "reason": str,
-           "details": dict}
-        """
+    def execute(self, task: dict[str, Any]) -> TaskOutcome:
+        """Execute one task and return a structured outcome."""
         ...
 
 
 class CustomWorker:
-    """Default bounded ReAct loop. Always available; no extra dependencies."""
+    """Default bounded ReAct loop. Always available; no extra dependencies.
+
+    Bridges a task into the `InnerLoop`, whose first step is always the Von
+    intent classification.
+    """
 
     name = "custom"
 
-    def execute(self, task: dict[str, Any]) -> dict[str, Any]:
-        """Phase 1 stub. Full implementation lands when the tool registry lands."""
-        raise NotImplementedError(
-            "CustomWorker.execute is a Phase 1 stub. "
-            "Currently the CLI uses the static router in cli.py::_run_one_step."
+    def __init__(self, deals_root, deal_id: str, router=None, registry=None,
+                 model: str = "qwen3:8b", ollama_url: str = "http://localhost:11434/v1",
+                 max_steps: int = 6) -> None:
+        self._loop = InnerLoop(
+            deals_root, deal_id, router=router, registry=registry,
+            model=model, ollama_url=ollama_url, max_steps=max_steps,
         )
+
+    def execute(self, task: dict[str, Any]) -> TaskOutcome:
+        message = task.get("description", "")
+        context = task.get("payload", {})
+        return self._loop.run(message, context=context)
 
 
 class DeepAgentWorker:

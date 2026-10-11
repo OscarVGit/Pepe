@@ -47,9 +47,10 @@ def test_first_ask_creates_workspace_and_inspects_excel(deal_root):
     res = _run(["ask", "atlas", "inspect models/base_lbo.xlsx"], cwd=deal_root.parent)
     assert res.returncode == 0, res.stderr
     out = json.loads(res.stdout)
-    assert out["outcome"]["kind"] == "tool_result"
-    assert out["outcome"]["tool"] == "excel_inspect_workbook"
-    assert "Inputs" in out["outcome"]["sheets"]
+    assert out["outcome"]["kind"] == "complete"
+    assert out["router"]["served_by"] == "fake"          # PEPE_ROUTER=fake in CI
+    assert out["outcome"]["result"]["sheets"] == ["Inputs"]
+    assert out["outcome"]["result"]["named_ranges"] == ["EntryMultiple"]
     assert out["state"] in {"COMPLETE", "VALIDATING", "IDLE"}  # last valid
 
     # Workspace artifacts on disk
@@ -66,7 +67,7 @@ def test_blocked_state_survives_restart(deal_root):
     res1 = _run(["ask", "atlas", "wait for debt terms"], cwd=deal_root.parent)
     assert res1.returncode == 0, res1.stderr
     out = json.loads(res1.stdout)
-    assert out["outcome"]["kind"] == "blocked"
+    assert out["outcome"]["kind"] == "waiting"
 
     # "Restart" the process by inspecting the persisted state.
     res2 = _run(["status", "atlas"], cwd=deal_root.parent)

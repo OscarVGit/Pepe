@@ -34,10 +34,39 @@ If you fork, document why, what changed, and how upstream updates flow back.
 - Tests mirror `src/pepe/`: `tests/unit|integration|agent|messaging|excel|fixtures`.
 - Never commit live deal contents under `deals/`.
 
-## 5. Current phase
+## 5. Adding an intent
 
-Phase 0 — architecture only. Define interfaces, docs, ADRs. Do not build full tools, do not hard-fork OpenCode/LangGraph, do not add heavy deps to the default install.
+Von classifies every inbound message against the taxonomy in `intents.json`
+at the repo root. To add an intent:
 
-## 6. Verification
+1. Edit `intents.json`: add `"label": "description"` under `intents`. The
+   description is what Von matches against; write it for the router, not the
+   tool.
+2. In `src/pepe/agent/inner_loop.py::_dispatch_intent`, add a `case` mapping
+   the label to a handler.
+3. If the intent needs a new tool, follow "Adding a tool" (§6).
+4. Add a unit test in `tests/unit/test_intent_router.py` using `FakeRouter`.
 
-After changes: `python -m compileall src` and `pytest --collect-only` (full suites arrive Phase 1+).
+`FakeRouter` is the deterministic test double; CI never downloads Von. Use
+`PEPE_ROUTER=fake` (env) or `--router fake` to force it locally.
+
+## 6. Adding a tool
+
+1. Implement a `ToolSpec` in `src/pepe/tools/built_in.py` (or a new module):
+   name, description, risk tier, callable.
+2. Register it in `register_builtin_tools()` so the registry sees it.
+3. High-risk tools raise `ApprovalRequired` from the registry boundary; the
+   orchestrator parks the task in `WAITING_FOR_APPROVAL`.
+4. Every tool call is audit-logged with inputs/outputs.
+
+## 7. Current phase
+
+Phase 1 — local agent. Deterministic finance lib + tool registry + bounded
+inner loop + Von intent router. Do not build full tools beyond the registry,
+do not hard-fork OpenCode/LangGraph, keep heavy deps out of the default install
+except `von-sdk`.
+
+## 8. Verification
+
+After changes: `python -m compileall src` and `pytest -q`. All tests run with
+`FakeRouter`; CI must never download Von weights.

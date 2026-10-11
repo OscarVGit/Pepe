@@ -53,3 +53,11 @@ in financial models.
   open-ended tasks it needs to.
 - LangGraph checkpointer as state owner — rejected: conflicts with
   per-deal pepe.db sovereignty.
+
+## Amendment (2026-10-11)
+
+The bounded inner loop's **first step is now always the Von intent
+classification** (ADR-0009). The deterministic fast-path survives only as the
+`RuleRouter` test fallback and is not a production path. All other decisions
+stand: default CustomWorker remains the local bounded loop; DeepAgents is the
+optional cloud research worker; the `Worker` Protocol keeps them swappable.

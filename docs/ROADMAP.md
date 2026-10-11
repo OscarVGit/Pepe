@@ -7,15 +7,20 @@
   local model via OpenAI-compat (Ollama), classification stubs, deterministic
   finance lib. **Pepe Core Index** at repo root: deal registry + global
   tasks mirror + user prefs; `pepe sync/list/pipeline/search` commands;
-  auto-sync on every mutation.
+  auto-sync on every mutation. **Universal Von-backed intent router:**
+  `intents.json` taxonomy, `IntentRouter` Protocol, `VonRouter` (in-process),
+  bounded inner loop with tool registry and trajectory observability.
 - **Phase 1.5 — Hybrid escalation (prerequisite for Phase 3):** sanitiser
   (deterministic templating + Presidio), LiteLLM-compatible gateway client,
   approval-gated cloud path, escalation audit. **Hard prerequisite for Phase
-  3 deep-agent activation.**
+  3 deep-agent activation.** **Von calibration:** `pepe calibrate` refits the
+  shipped confidence map on a labelled PE message set.
 - **Phase 2 — Messaging:** Telegram adapter (polling) first; user↔agent and
   conversation↔deal binding; async updates. WhatsApp second; Slack/Teams/Web
-  later. Core Index queries (`pepe pipeline`, `pepe status` with no deal_id)
-  become the user-facing summary across all deals.
+  later. Inbound channel messages flow through the same `IntentRouter`; no
+  channel-specific special-casing. Core Index queries (`pepe pipeline`,
+  `pepe status` with no deal_id) become the user-facing summary across all
+  deals.
 - **Phase 3 — Financial Analyst + bounded deep-agent worker:** CIM
   extraction, Excel inspection, financial extraction/reconciliation,
   LBO/DCF/scenarios, validation tooling. **Add bounded deep-agent worker for

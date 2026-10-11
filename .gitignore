@@ -15,3 +15,6 @@ deals/*/
 pepe.db
 pepe.db-wal
 pepe.db-shm
+
+# Local Von model weights (self-contained offline copy, ~2.9 GB)
+models/von/

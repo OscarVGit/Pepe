@@ -12,3 +12,8 @@ Cloud escalation of non-`APPROVED_CLOUD` data is at least medium (report what
 was sent) and high when `CONFIDENTIAL/RESTRICTED` ("I can send a de-identified
 representation to the approved provider. Proceed?"). Approval recorded in audit.
 Enforced in `agent/policy.py` + gateway policy file — never prompt-only.
+
+The Von intent router may classify an `approval_response` intent ("yes/no/go
+ahead"), but the **grant** is a deterministic, guarded state transition that is
+valid only when a task is actually `WAITING_FOR_APPROVAL`. The router never
+approves; it only routes. See ADR-0009.
